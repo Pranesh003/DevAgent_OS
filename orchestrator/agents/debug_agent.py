@@ -45,7 +45,7 @@ Respond with ONLY valid JSON:
 """
 
 
-def debug_node(state: AgentState) -> AgentState:
+async def debug_node(state: AgentState) -> AgentState:
     """LangGraph node: Debugging Agent"""
     llm = get_llm(TaskType.DEBUGGING, temperature=0.1)
 
@@ -66,7 +66,7 @@ def debug_node(state: AgentState) -> AgentState:
     ]
 
     try:
-        response = llm.invoke(messages)
+        response = await llm.ainvoke(messages)
         debug_output = parse_llm_json(response.content)
 
         # Apply fixes to code_files

@@ -38,7 +38,7 @@ ONBOARDING must include: Getting started in 5 minutes, Common workflows, Trouble
 """
 
 
-def documentation_node(state: AgentState) -> AgentState:
+async def documentation_node(state: AgentState) -> AgentState:
     """LangGraph node: Documentation Agent"""
     llm = get_llm(TaskType.DOCUMENTATION, temperature=0.2)
 
@@ -72,7 +72,7 @@ CRITIQUE SCORE: {state.get('critique_score', 'N/A')}/10
     ]
 
     try:
-        response = llm.invoke(messages)
+        response = await llm.ainvoke(messages)
         content = response.content
         
         try:

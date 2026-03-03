@@ -9,7 +9,7 @@ from datetime import datetime
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_community.llms import Ollama
 from routing.model_router import get_llm, TaskType
-from memory.supabase_store import store_memory
+# from memory.supabase_store import store_memory
 from graph.state import AgentState
 from utils.json_parser import parse_llm_json
 
@@ -38,7 +38,7 @@ def _get_local_llm():
     return get_llm(TaskType.MEMORY_SUMMARIZATION, temperature=0.1)
 
 
-def memory_node(state: AgentState) -> AgentState:
+async def memory_node(state: AgentState) -> AgentState:
     """LangGraph node: Memory Reflection Agent"""
 
     # Build rich session context
@@ -61,7 +61,7 @@ def memory_node(state: AgentState) -> AgentState:
             SystemMessage(content=SUMMARIZER_PROMPT),
             HumanMessage(content=f"Summarize this agent session:\n{json.dumps(session_context, indent=2)}"),
         ]
-        response = llm.invoke(messages) if hasattr(llm, 'invoke') else llm(messages[-1].content)
+        response = await llm.ainvoke(messages)
         content = response.content if hasattr(response, 'content') else str(response)
         reflection = parse_llm_json(content)
 
@@ -77,15 +77,16 @@ def memory_node(state: AgentState) -> AgentState:
         ]
 
         for insight in insights_to_store:
-            try:
-                store_memory(
-                    content=insight["content"],
-                    memory_type=insight["type"],
-                    project_id=state["project_id"],
-                    metadata={"session_id": state["session_id"], "iteration": state["iteration"]},
-                )
-            except Exception:
-                pass  # Non-critical: memory persistence failure shouldn't stop the workflow
+            pass # Skipping memory store to bypass httpx deadlocks
+            # try:
+            #     store_memory(
+            #         content=insight["content"],
+            #         memory_type=insight["type"],
+            #         project_id=state["project_id"],
+            #         metadata={"session_id": state["session_id"], "iteration": state["iteration"]},
+            #     )
+            # except Exception as e:
+            #     state["errors"].append(f"Failed to store insight: {str(e)}")
 
         state["reflections"] = reflection.get("key_lessons", [])
         state["messages"].append({

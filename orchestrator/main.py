@@ -135,10 +135,22 @@ async def run_workflow_async(session_id: str, initial_state: AgentState):
                     })
 
         active_sessions[session_id]["status"] = "completed"
+        # Include final state in the completion event for persistence
+        final_state_serializable = {
+            "project_id": initial_state["project_id"],
+            "code_files": current_state.get("code_files") or [],
+            "documentation": current_state.get("documentation") or {},
+            "architecture": current_state.get("architecture") or {},
+            "tests": current_state.get("tests") or [],
+            "critique_score": current_state.get("critique_score"),
+            "reflections": current_state.get("reflections") or [],
+        }
+        
         await broadcast_event(session_id, make_event(
             agent="System", action="complete",
             content="✅ All agents completed successfully.",
             project_id=initial_state["project_id"],
+            **final_state_serializable
         ))
 
     except Exception as e:

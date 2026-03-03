@@ -49,19 +49,34 @@ You MUST respond with ONLY valid JSON in the following format:
 }"""
 
 
-def requirement_node(state: AgentState) -> AgentState:
+async def requirement_node(state: AgentState) -> AgentState:
     """LangGraph node: Requirement Understanding Agent"""
     llm = get_llm(TaskType.REQUIREMENT_ANALYSIS, temperature=0.1)
 
+    # 1. Skip memory retrieval to prevent httpx deadlocks
+    memories = []
+    # try:
+    #     from memory.supabase_store import search_memory
+    #     # Search for similar requirements or past projects
+    #     memories = search_memory(state['raw_requirements'], limit=3)
+    # except Exception as e:
+    #     state["errors"].append(f"Memory retrieval failed: {str(e)}")
+
+    memory_context = ""
+    if memories:
+        memory_context = "\n\n### RELEVANT PAST KNOWLEDGE:\n"
+        for m in memories:
+            memory_context += f"- [{m.get('type')}] {m.get('content')}\n"
+
     messages = [
-        SystemMessage(content=SYSTEM_PROMPT),
+        SystemMessage(content=SYSTEM_PROMPT + (f"\n\nCONSIDER PREVIOUS CONTEXT:\n{memory_context}" if memory_context else "")),
         HumanMessage(
             content=f"Analyze these requirements and extract a structured specification:\n\n{state['raw_requirements']}"
         ),
     ]
 
     try:
-        response = llm.invoke(messages)
+        response = await llm.ainvoke(messages)
         requirements = parse_llm_json(response.content)
 
         state["requirements"] = requirements

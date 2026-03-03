@@ -15,7 +15,7 @@ from agents.documentation_agent import documentation_node
 from agents.memory_agent import memory_node
 
 
-def increment_iteration(state: AgentState) -> AgentState:
+async def increment_iteration(state: AgentState) -> AgentState:
     """Increment iteration counter when entering refactor loop."""
     state["iteration"] = state.get("iteration", 0) + 1
     state["current_phase"] = "codegen"
