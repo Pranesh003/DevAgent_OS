@@ -1,26 +1,25 @@
 const { createClient } = require('@supabase/supabase-js');
-// Import OpenAI class explicitly for v4
-const { OpenAI } = require('openai');
-const { supabase: supabaseConfig, openai: openaiConfig } = require('../config/env');
+const { GoogleGenerativeAI } = require('@google/generative-ai');
+const { supabase: supabaseConfig, google: googleConfig } = require('../config/env');
 const logger = require('../utils/logger');
 
 const supabase = createClient(supabaseConfig.url, supabaseConfig.serviceKey);
 
-// Initialize OpenAI v4 client
-const openai = new OpenAI({ apiKey: openaiConfig.apiKey });
+// Initialize Google AI
+const genAI = new GoogleGenerativeAI(googleConfig.apiKey);
+const model = genAI.getGenerativeModel({ model: "gemini-embedding-001" });
 
 const TABLE_NAME = 'agent_memory';
 
 /**
- * Generate embedding for text using OpenAI
+ * Generate embedding for text using Google Gemini
  */
 const getEmbedding = async (text) => {
-  // Use new v4 API format
-  const response = await openai.embeddings.create({
-    model: 'text-embedding-3-small',
-    input: text.slice(0, 8000), // Supabase vector has size limits
+  const result = await model.embedContent({
+    content: { parts: [{ text: text.slice(0, 8000) }] },
+    outputDimensionality: 768
   });
-  return response.data[0].embedding;
+  return result.embedding.values;
 };
 
 /**
@@ -65,7 +64,7 @@ const searchMemory = async (query, projectId, limit = 5) => {
     if (error) throw error;
     return data || [];
   } catch (err) {
-    logger.error('Memory search failed:', err.message);
+    logger.error(`Memory search failed: ${err.message}`, { stack: err.stack, details: err.details });
     return [];
   }
 };

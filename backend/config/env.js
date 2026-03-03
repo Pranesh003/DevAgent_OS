@@ -17,6 +17,7 @@ const envSchema = Joi.object({
   SUPABASE_ANON_KEY: Joi.string().required(),
   SUPABASE_SERVICE_KEY: Joi.string().required(),
   OPENAI_API_KEY: Joi.string().required(),
+  GOOGLE_API_KEY: Joi.string().required(),
   ORCHESTRATOR_URL: Joi.string().uri().default("http://localhost:8000"),
 }).unknown(true);
 
@@ -42,6 +43,9 @@ module.exports = {
   },
   openai: {
     apiKey: envVars.OPENAI_API_KEY,
+  },
+  google: {
+    apiKey: envVars.GOOGLE_API_KEY,
   },
   orchestratorUrl: envVars.ORCHESTRATOR_URL,
 };

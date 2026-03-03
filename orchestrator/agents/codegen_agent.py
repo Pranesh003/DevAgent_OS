@@ -121,7 +121,7 @@ def _extract_code_blocks_from_text(raw_text: str) -> list:
     return files
 
 
-def codegen_node(state: AgentState) -> AgentState:
+async def codegen_node(state: AgentState) -> AgentState:
     """LangGraph node: Code Generation Agent"""
     llm = get_llm(TaskType.CODE_GENERATION, temperature=0.2)
 
@@ -150,7 +150,7 @@ Generate all necessary files for a working application.
     ]
 
     try:
-        response = llm.invoke(messages)
+        response = await llm.ainvoke(messages)
         raw_content = response.content
         print(f"[CodeGen] Raw response length: {len(raw_content)}")
 

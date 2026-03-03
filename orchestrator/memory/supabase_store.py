@@ -6,11 +6,24 @@ for persistent agent memory across sessions.
 import os
 from typing import Optional, List, Dict, Any
 from supabase import create_client, Client
-from openai import OpenAI
+from langchain_google_genai import GoogleGenerativeAIEmbeddings
 
-openai_client = None
-if os.getenv("OPENAI_API_KEY"):
-    openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+_embeddings: Optional[GoogleGenerativeAIEmbeddings] = None
+
+def _get_embeddings_client() -> GoogleGenerativeAIEmbeddings:
+    global _embeddings
+    if _embeddings is None:
+        api_key = os.getenv("GOOGLE_API_KEY")
+        if not api_key:
+            raise ValueError("GOOGLE_API_KEY must be set for embeddings")
+        _embeddings = GoogleGenerativeAIEmbeddings(
+            model="models/gemini-embedding-001",
+            google_api_key=api_key,
+            task_type="retrieval_document",
+            output_dimensionality=768
+        )
+    return _embeddings
+
 
 _supabase: Optional[Client] = None
 
@@ -27,15 +40,9 @@ def _get_supabase() -> Client:
 
 
 def _get_embedding(text: str) -> List[float]:
-    """Generate text embedding using OpenAI text-embedding-3-small."""
-    if not openai_client:
-        print("[Warning] OPENAI_API_KEY not set. Returning dummy embedding.")
-        return [0.0] * 1536
-    response = openai_client.embeddings.create(
-        model="text-embedding-3-small",
-        input=text[:8000],
-    )
-    return response.data[0].embedding
+    """Generate text embedding using Google Gemini text-embedding-004."""
+    client = _get_embeddings_client()
+    return client.embed_query(text[:8000])
 
 
 def store_memory(

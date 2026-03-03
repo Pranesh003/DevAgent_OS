@@ -100,8 +100,34 @@ const broadcastEvent = async (req, res) => {
       model_used: event.model,
       duration_ms: event.duration_ms,
     }]);
+
+    // If workflow is complete, persist final results to the project record
+    if (event.action === 'complete') {
+      const results = {
+        code_files: event.code_files || [],
+        documentation: event.documentation || {},
+        architecture: event.architecture || {},
+        tests: event.tests || [],
+        critique_score: event.critique_score,
+        reflections: event.reflections || [],
+      };
+
+      await supabase
+        .from('projects')
+        .update({ status: 'completed', architecture: event.architecture })
+        .eq('id', event.project_id);
+
+      // We might want to store results in a separate column or just files
+      // Since 'files' exists, let's update it too
+      if (results.code_files.length > 0) {
+        await supabase
+          .from('projects')
+          .update({ files: results.code_files })
+          .eq('id', event.project_id);
+      }
+    }
   } catch (err) {
-    logger.warn('Activity log failed:', err.message);
+    logger.warn('Activity log or result persistence failed:', err.message);
   }
 
   // Broadcast to SSE clients
@@ -128,8 +154,9 @@ const getSessionStatus = async (req, res) => {
 
   const { data: project } = await supabase
     .from('projects')
-    .select('status, name')
+    .select('status, name, current_session_id')
     .eq('current_session_id', sessionId)
+    .or(`current_session_id.eq.${sessionId}`) // Ensure we find it
     .single();
 
   res.json({ success: true, data: { project, activities } });
@@ -139,14 +166,42 @@ const getSessionStatus = async (req, res) => {
 const getSessionResults = async (req, res) => {
   const { sessionId } = req.params;
   try {
-    const { data } = await axios.get(`${orchestratorUrl}/results/${sessionId}`);
-    res.json({ success: true, data });
-  } catch (err) {
-    if (err.response && err.response.status === 202) {
-      return res.status(202).json({ success: true, message: 'Processing' });
+    // 1. Try orchestrator (memory) first for speed and live data
+    try {
+      const { data } = await axios.get(`${orchestratorUrl}/results/${sessionId}`);
+      if (data && (data.code_files?.length > 0 || Object.keys(data.documentation || {}).length > 0)) {
+        return res.json({ success: true, data });
+      }
+    } catch (e) {
+      logger.debug(`Orchestrator results 404/error for ${sessionId}, checking DB...`);
     }
-    logger.error(`Orchestrator results failed: ${err.message}`);
-    res.status(500).json({ success: false, message: 'Failed to fetch results' });
+
+    // 2. Fallback to Supabase projects table (files column)
+    const { data: project } = await supabase
+      .from('projects')
+      .select('files, architecture, status')
+      .eq('current_session_id', sessionId)
+      .single();
+
+    if (project && project.files?.length > 0) {
+      return res.json({
+        success: true,
+        data: {
+          session_id: sessionId,
+          status: project.status,
+          code_files: project.files,
+          documentation: {}, // Future: Add doc column to DB if needed
+          architecture: project.architecture,
+          tests: [],
+          errors: []
+        }
+      });
+    }
+
+    res.status(404).json({ success: false, message: 'Results not found in memory or database' });
+  } catch (err) {
+    logger.error(`Get session results failed: ${err.message}`);
+    res.status(500).json({ success: false, message: 'Internal server error' });
   }
 };
 

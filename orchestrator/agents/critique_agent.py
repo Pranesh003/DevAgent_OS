@@ -35,7 +35,7 @@ Score < 7.0 means refactoring is required. Score >= 7.0 means it passes.
 """
 
 
-def critique_node(state: AgentState) -> AgentState:
+async def critique_node(state: AgentState) -> AgentState:
     """LangGraph node: Critique Agent (multi-agent debate)"""
     llm = get_llm(TaskType.CRITIQUE, temperature=0.3)
 
@@ -75,7 +75,7 @@ Debug Issues: {len(state.get('debug_output', {}).get('issues', []))} issues foun
                 content=f"CRITICISM:\n{criticism}\n\nDEFENSE:\n{defense}\n\nPROJECT:\n{summary}"
             ),
         ]
-        judge_response = llm.invoke(judge_messages)
+        judge_response = await llm.ainvoke(judge_messages)
         verdict = parse_llm_json(judge_response.content)
 
         score = float(verdict.get("score", 5.0))

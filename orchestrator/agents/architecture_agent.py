@@ -59,7 +59,7 @@ Respond with ONLY valid JSON:
 }"""
 
 
-def architecture_node(state: AgentState) -> AgentState:
+async def architecture_node(state: AgentState) -> AgentState:
     """LangGraph node: Architecture Planning Agent"""
     llm = get_llm(TaskType.ARCHITECTURE_PLANNING, temperature=0.1)
 
@@ -73,7 +73,7 @@ def architecture_node(state: AgentState) -> AgentState:
     ]
 
     try:
-        response = llm.invoke(messages)
+        response = await llm.ainvoke(messages)
         architecture = parse_llm_json(response.content)
 
         state["architecture"] = architecture

@@ -44,7 +44,7 @@ Guidelines:
 """
 
 
-def testing_node(state: AgentState) -> AgentState:
+async def testing_node(state: AgentState) -> AgentState:
     """LangGraph node: Testing Agent"""
     llm = get_llm(TaskType.TESTING, temperature=0.1)
 
@@ -78,7 +78,7 @@ KNOWN ISSUES TO TEST FOR:
     ]
 
     try:
-        response = llm.invoke(messages)
+        response = await llm.ainvoke(messages)
         test_output = parse_llm_json(response.content)
 
         test_files = test_output.get("test_files", [])
