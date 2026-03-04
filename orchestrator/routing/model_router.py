@@ -6,6 +6,7 @@ to handle free-tier rate limits gracefully.
 import os
 import time
 import threading
+import asyncio
 from enum import Enum
 from dotenv import load_dotenv
 
@@ -42,16 +43,16 @@ class TaskType(str, Enum):
 
 # ── Routing table: task_type -> (model, max_tokens) ──────────────────────────
 ROUTING_TABLE = {
-    TaskType.REQUIREMENT_ANALYSIS:   ("gemini-2.5-flash", 4096),
-    TaskType.ARCHITECTURE_PLANNING:  ("gemini-2.5-flash", 4096),
-    TaskType.CODE_GENERATION:        ("gemini-2.5-flash", 8192),
-    TaskType.DEBUGGING:              ("gemini-2.5-flash", 4096),
-    TaskType.TESTING:                ("gemini-2.5-flash", 4096),
-    TaskType.CRITIQUE:               ("gemini-2.5-flash", 2048),
-    TaskType.DOCUMENTATION:          ("gemini-2.5-flash", 8192),
-    TaskType.MEMORY_SUMMARIZATION:   ("gemini-2.5-flash", 2048),
-    TaskType.CREATIVE_IDEATION:      ("gemini-2.5-flash", 4096),
-    TaskType.UI_GENERATION:          ("gemini-2.5-flash", 4096),
+    TaskType.REQUIREMENT_ANALYSIS:   ("models/gemini-2.0-flash", 4096),
+    TaskType.ARCHITECTURE_PLANNING:  ("models/gemini-2.0-flash", 4096),
+    TaskType.CODE_GENERATION:        ("models/gemini-2.0-flash", 8192),
+    TaskType.DEBUGGING:              ("models/gemini-2.0-flash", 4096),
+    TaskType.TESTING:                ("models/gemini-2.0-flash", 4096),
+    TaskType.CRITIQUE:               ("models/gemini-2.0-flash", 2048),
+    TaskType.DOCUMENTATION:          ("models/gemini-2.0-flash", 8192),
+    TaskType.MEMORY_SUMMARIZATION:   ("models/gemini-2.0-flash", 2048),
+    TaskType.CREATIVE_IDEATION:      ("models/gemini-2.0-flash", 4096),
+    TaskType.UI_GENERATION:          ("models/gemini-2.0-flash", 4096),
 }
 
 
@@ -119,9 +120,12 @@ class SyncRequestsGeminiModel(BaseChatModel):
 
         last_error = None
         import urllib.request
-        
+        import urllib.error
+
         for key in self.keys:
-            url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.model}:generateContent?key={key}"
+            # Ensure model starts with models/
+            model_path = self.model if self.model.startswith("models/") else f"models/{self.model}"
+            url = f"https://generativelanguage.googleapis.com/v1beta/{model_path}:generateContent?key={key}"
             try:
                 req = urllib.request.Request(url, data=json.dumps(payload).encode('utf-8'), headers={'Content-Type': 'application/json'})
                 with urllib.request.urlopen(req, timeout=30) as response:
@@ -132,6 +136,7 @@ class SyncRequestsGeminiModel(BaseChatModel):
             except urllib.error.HTTPError as he:
                 if he.code == 429:
                     last_error = f"429 Quota Exceeded for {key[-5:]}"
+                    time.sleep(1) # Brief sync wait
                     continue
                 else:
                     last_error = f"{he.code}: {he.read().decode('utf-8')}"
@@ -141,7 +146,7 @@ class SyncRequestsGeminiModel(BaseChatModel):
         # OpenAI Fallback if all Google API keys are exhausted
         openai_key = os.getenv("OPENAI_API_KEY")
         if openai_key:
-            print("[Warning] Falling back to OpenAI gpt-4o-mini due to exhausted Google keys.")
+            print("[Warning] Falling back to OpenAI gpt-4o-mini...")
             openai_url = "https://api.openai.com/v1/chat/completions"
             openai_payload = {
                 "model": "gpt-4o-mini",
@@ -160,47 +165,31 @@ class SyncRequestsGeminiModel(BaseChatModel):
                         data = json.loads(response.read().decode('utf-8'))
                         text = data["choices"][0]["message"]["content"]
                         return ChatResult(generations=[ChatGeneration(message=AIMessage(content=text))])
-            except urllib.error.HTTPError as he:
-                print(f"[Error] OpenAI API Error: {he.code} - {he.read().decode('utf-8')}")
             except Exception as oe:
                 print(f"[Error] OpenAI fallback failed: {oe}")
         
-        # Anthropic Fallback if OpenAI also fails
-        anthropic_key = os.getenv("ANTHROPIC_API_KEY")
-        if anthropic_key:
-            print("[Warning] Falling back to Anthropic claude-3-5-sonnet-20241022...")
-            anthropic_url = "https://api.anthropic.com/v1/messages"
-            system_msg = next((m.content for m in messages if m.type == "system"), "")
-            user_msgs = [{"role": "user", "content": str(m.content)} for m in messages if m.type in ["user", "human"]]
-            
-            anthropic_payload = {
-                "model": "claude-3-5-sonnet-20241022",
-                "max_tokens": 4096,
-                "temperature": self.temperature,
-                "messages": user_msgs
-            }
-            if system_msg:
-                anthropic_payload["system"] = system_msg
-            if stop:
-                anthropic_payload["stop_sequences"] = stop
-                
+        # Ollama local fallback
+        ollama_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+        ollama_model = os.getenv("OLLAMA_MODEL", "llama3")
+        if ollama_url:
+            print(f"[Warning] Falling back to local Ollama ({ollama_model})...")
             try:
-                req = urllib.request.Request(anthropic_url, data=json.dumps(anthropic_payload).encode('utf-8'), headers={
-                    "x-api-key": anthropic_key,
-                    "anthropic-version": "2023-06-01",
-                    "content-type": "application/json"
-                })
-                with urllib.request.urlopen(req, timeout=30) as response:
+                ollama_payload = {
+                    "model": ollama_model,
+                    "prompt": "\n".join([str(m.content) for m in messages]),
+                    "stream": False,
+                    "options": {"temperature": self.temperature}
+                }
+                req = urllib.request.Request(f"{ollama_url}/api/generate", data=json.dumps(ollama_payload).encode('utf-8'), headers={"Content-Type": "application/json"})
+                with urllib.request.urlopen(req, timeout=60) as response:
                     if response.status == 200:
                         data = json.loads(response.read().decode('utf-8'))
-                        text = data.get("content", [{}])[0].get("text", "")
+                        text = data.get("response", "")
                         return ChatResult(generations=[ChatGeneration(message=AIMessage(content=text))])
-            except urllib.error.HTTPError as he:
-                print(f"[Error] Anthropic API Error: {he.code} - {he.read().decode('utf-8')}")
-            except Exception as ae:
-                print(f"[Error] Anthropic fallback failed: {ae}")
+            except Exception as e:
+                print(f"[Error] Ollama fallback failed: {e}")
 
-        raise RuntimeError(f"All configured API Keys (Google, OpenAI, Anthropic) are exhausted. Last error: {last_error}")
+        raise RuntimeError(f"All configured LLM providers (Google, OpenAI, Ollama) are exhausted. Last error: {last_error}")
 
     async def _agenerate(self, messages: List[BaseMessage], stop: Optional[List[str]] = None, run_manager=None, **kwargs) -> ChatResult:
         # Simple conversion of langchain messages to Gemini format
@@ -219,9 +208,10 @@ class SyncRequestsGeminiModel(BaseChatModel):
             payload["generationConfig"]["stopSequences"] = stop
 
         last_error = None
-        async with httpx.AsyncClient(timeout=10.0) as client:
+        async with httpx.AsyncClient(timeout=30.0) as client:
             for key in self.keys:
-                url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.model}:generateContent?key={key}"
+                model_path = self.model if self.model.startswith("models/") else f"models/{self.model}"
+                url = f"https://generativelanguage.googleapis.com/v1beta/{model_path}:generateContent?key={key}"
                 try:
                     resp = await client.post(url, json=payload)
                     if resp.status_code == 200:
@@ -230,6 +220,7 @@ class SyncRequestsGeminiModel(BaseChatModel):
                         return ChatResult(generations=[ChatGeneration(message=AIMessage(content=text))])
                     elif resp.status_code == 429:
                         last_error = f"429 Quota Exceeded for {key[-5:]}"
+                        await asyncio.sleep(1.5)
                         continue
                 except Exception as e:
                     last_error = repr(e)
@@ -258,7 +249,7 @@ class SyncRequestsGeminiModel(BaseChatModel):
                 system_msg = next((m.content for m in messages if m.type == "system"), "")
                 user_msgs = [{"role": "user", "content": str(m.content)} for m in messages if m.type in ["user", "human"]]
                 anthropic_payload = {
-                    "model": "claude-3-5-sonnet-20241022",
+                    "model": "claude-3-5-sonnet-latest",
                     "max_tokens": 4096,
                     "temperature": self.temperature,
                     "messages": user_msgs
@@ -277,6 +268,23 @@ class SyncRequestsGeminiModel(BaseChatModel):
                 except Exception:
                     pass
 
+            # Ollama local fallback
+            ollama_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+            ollama_model = os.getenv("OLLAMA_MODEL", "llama3")
+            if ollama_url:
+                try:
+                    ollama_payload = {
+                        "model": ollama_model,
+                        "prompt": "\n".join([str(m.content) for m in messages]),
+                        "stream": False
+                    }
+                    resp = await client.post(f"{ollama_url}/api/generate", json=ollama_payload, timeout=60.0)
+                    if resp.status_code == 200:
+                        text = resp.json().get("response", "")
+                        return ChatResult(generations=[ChatGeneration(message=AIMessage(content=text))])
+                except Exception:
+                    pass
+
         raise RuntimeError(f"All API Keys exhausted in async path. Last error: {last_error}")
 
     @property
@@ -290,7 +298,7 @@ def get_llm(task_type: TaskType, temperature: float = 0.0):
     Creates multiple clients (one per key) and chains them as fallbacks
     so that if one key is rate-limited, it automatically tries the next.
     """
-    model, max_tokens = ROUTING_TABLE.get(task_type, ("gemini-2.5-flash", 4096))
+    model, max_tokens = ROUTING_TABLE.get(task_type, ("models/gemini-1.5-flash", 4096))
 
     return SyncRequestsGeminiModel(
         keys=_key_pool._keys.copy(),
