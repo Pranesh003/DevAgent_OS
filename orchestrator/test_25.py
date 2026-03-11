@@ -10,7 +10,7 @@ model = "models/gemini-2.5-flash"
 
 url = f"https://generativelanguage.googleapis.com/v1beta/{model}:generateContent?key={key}"
 payload = {
-    "contents": [{"role": "user", "parts": [{"text": "Hi"}]}]
+    "contents": [{"role": "user", "parts": [{"text": "Hi Hello"}]}]
 }
 
 print(f"Testing key: {key[:10]}... with model: {model}")
